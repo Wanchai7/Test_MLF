@@ -2,23 +2,36 @@
 ob_start();
 require 'db.php';
 
-// เช็คสิทธิ์: เข้าได้ทั้ง admin และ owner (เพิ่ม Admin เข้าไปในเงื่อนไข)
 if (!isset($_SESSION['role']) || ($_SESSION['role'] != 'owner' && $_SESSION['role'] != 'admin')) {
-    $_SESSION['alert'] = ['type' => 'error', 'title' => 'Access Denied', 'text' => 'ไม่มีสิทธิ์เข้าถึง'];
     header("Location: index.php");
     exit;
 }
 
-// Logic ลบสถานที่ (ทำได้ทั้งคู่)
+// Logic ลบสถานที่
 if (isset($_GET['delete_place'])) {
-    $stmt = $pdo->prepare("DELETE FROM places WHERE id = ?");
-    $stmt->execute([$_GET['delete_place']]);
-    $_SESSION['alert'] = ['type' => 'success', 'title' => 'ลบสำเร็จ', 'text' => 'ลบสถานที่ออกจากระบบแล้ว'];
+    $pid = $_GET['delete_place'];
+
+    if ($_SESSION['role'] == 'admin') {
+        // [ADMIN] -> ส่งคำขอลบ
+        $stmt = $pdo->prepare("INSERT INTO place_requests (admin_id, place_id, action_type) VALUES (?, ?, 'DELETE')");
+        $stmt->execute([$_SESSION['user_id'], $pid]);
+        $_SESSION['alert'] = ['type' => 'warning', 'title' => 'ส่งคำขอลบแล้ว', 'text' => 'รอ Owner อนุมัติการลบนี้'];
+    } else {
+        // [OWNER] -> ลบเลย
+        $stmt = $pdo->prepare("DELETE FROM places WHERE id = ?");
+        $stmt->execute([$pid]);
+        $_SESSION['alert'] = ['type' => 'success', 'title' => 'ลบสำเร็จ', 'text' => 'ลบสถานที่ออกจากระบบแล้ว'];
+    }
     header("Location: owner_places.php");
     exit;
 }
 
 $places = $pdo->query("SELECT * FROM places ORDER BY id DESC")->fetchAll();
+// นับจำนวนคำขอรออนุมัติ (เฉพาะ Owner ถึงจะเห็น)
+$req_count = 0;
+if ($_SESSION['role'] == 'owner') {
+    $req_count = $pdo->query("SELECT COUNT(*) FROM place_requests")->fetchColumn();
+}
 ?>
 <!DOCTYPE html>
 <html lang="th">
@@ -27,14 +40,34 @@ $places = $pdo->query("SELECT * FROM places ORDER BY id DESC")->fetchAll();
     <meta charset="UTF-8">
     <title>จัดการสถานที่</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Prompt', sans-serif;
+            background: #f8f9fa;
+        }
+    </style>
 </head>
 
-<body class="d-flex flex-column min-vh-100 bg-light">
+<body>
     <?php include 'navbar.php'; ?>
     <div class="container mt-5">
         <div class="d-flex justify-content-between align-items-center mb-4">
-            <h2>👑 จัดการสถานที่ (<?= ucfirst($_SESSION['role']) ?> Mode)</h2>
-            <a href="place_form.php" class="btn btn-success">+ เพิ่มสถานที่ใหม่</a>
+            <h2>🏰 จัดการสถานที่ (<?= ucfirst($_SESSION['role']) ?>)</h2>
+            <div class="d-flex gap-2">
+                <?php if ($_SESSION['role'] == 'owner'): ?>
+                    <a href="owner_requests.php" class="btn btn-warning position-relative">
+                        📩 คำขออนุมัติ
+                        <?php if ($req_count > 0): ?>
+                            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                                <?= $req_count ?>
+                            </span>
+                        <?php endif; ?>
+                    </a>
+                <?php endif; ?>
+
+                <a href="place_form.php" class="btn btn-success">+ เพิ่มสถานที่</a>
+            </div>
         </div>
 
         <div class="row">
@@ -50,7 +83,7 @@ $places = $pdo->query("SELECT * FROM places ORDER BY id DESC")->fetchAll();
                                 <a href="place_form.php?edit=<?= $p['id'] ?>"
                                     class="btn btn-warning btn-sm w-50 me-1">แก้ไข</a>
                                 <a href="?delete_place=<?= $p['id'] ?>" class="btn btn-danger btn-sm w-50"
-                                    onclick="return confirm('ยืนยันลบสถานที่นี้?');">ลบ</a>
+                                    onclick="return confirm('ยืนยันลบ?');">ลบ</a>
                             </div>
                         </div>
                     </div>
@@ -58,7 +91,6 @@ $places = $pdo->query("SELECT * FROM places ORDER BY id DESC")->fetchAll();
             <?php endforeach; ?>
         </div>
     </div>
-    <?php include 'footer.php'; ?>
 </body>
 
 </html>

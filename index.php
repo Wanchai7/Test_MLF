@@ -3,90 +3,111 @@ ob_start();
 require 'db.php';
 
 // ==========================================
-// 1. ส่วนเตรียมตัวแปร (เก็บค่าการค้นหาปัจจุบันไว้)
+// 1. ส่วนเตรียมตัวแปร & Logic
 // ==========================================
 $current_mood = isset($_GET['mood_id']) ? $_GET['mood_id'] : '';
 $current_coping = isset($_GET['coping_method']) ? $_GET['coping_method'] : '';
+$search_query = isset($_GET['q']) ? $_GET['q'] : '';
 
-// สร้าง Query String สำหรับส่งกลับไปหน้าเดิม (เพื่อให้หลังกดปุ่มต่างๆ ยังอยู่ที่หน้าค้นหาเดิม)
+// --- Logic วิเคราะห์จากคำตอบ (Quiz) ---
+if (isset($_GET['quiz_action'])) {
+    $q_desire = $_GET['q_desire'] ?? '';
+    // Map ความต้องการ -> Mood ID
+    $mood_map = [
+        'party' => 1,
+        'cry' => 2,
+        'relax' => 3,
+        'sleep' => 4,
+        'run' => 5,
+        'scream' => 6
+    ];
+
+    if (isset($mood_map[$q_desire])) {
+        $current_mood = $mood_map[$q_desire];
+        $mood_names = [
+            1 => 'มีความสุข (Happy)',
+            2 => 'เศร้า (Sad)',
+            3 => 'เครียด (Stressed)',
+            4 => 'เหนื่อยล้า (Tired)',
+            5 => 'มีพลัง (Energetic)',
+            6 => 'โกรธ (Angry)'
+        ];
+        $detected_name = $mood_names[$current_mood];
+        $_SESSION['alert'] = ['type' => 'success', 'title' => '🤖 วิเคราะห์เสร็จสิ้น!', 'text' => "ดูเหมือนคุณกำลัง \"$detected_name\""];
+    }
+}
+
+// Query String สำหรับ Redirect
 $redirect_params = "";
 if ($current_mood != '') {
-    $redirect_params = "?mood_id=" . $current_mood . "&coping_method=" . urlencode($current_coping);
+    $redirect_params = "?mood_id=" . $current_mood . "&coping_method=" . urlencode($current_coping) . "&q=" . urlencode($search_query);
 }
 
 // ==========================================
-// 2. ส่วน Logic การทำงาน (History & Favorites)
+// 2. Logic บันทึก History & Favorites
 // ==========================================
-
-// --- บันทึกประวัติ (History) ---
 if (isset($_GET['go_place']) && isset($_SESSION['user_id'])) {
     $stmt = $pdo->prepare("INSERT INTO user_history (user_id, place_id) VALUES (?, ?)");
     $stmt->execute([$_SESSION['user_id'], $_GET['go_place']]);
-    $_SESSION['alert'] = ['type' => 'success', 'title' => '🗺️ เริ่มการเดินทาง!', 'text' => 'ระบบบันทึกประวัติเรียบร้อยแล้ว'];
-
+    $_SESSION['alert'] = ['type' => 'success', 'title' => '🗺️ เริ่มการเดินทาง!', 'text' => 'บันทึกประวัติเรียบร้อยแล้ว'];
     header("Location: index.php" . $redirect_params);
     exit;
 }
 
-// --- บันทึก/ยกเลิก รายการโปรด (Favorites Toggle) ---
 if (isset($_GET['fav_place']) && isset($_SESSION['user_id'])) {
     $uid = $_SESSION['user_id'];
     $pid = $_GET['fav_place'];
-
-    // เช็คว่ามีอยู่แล้วหรือไม่?
     $check = $pdo->prepare("SELECT * FROM favorites WHERE user_id = ? AND place_id = ?");
     $check->execute([$uid, $pid]);
 
     if ($check->fetch()) {
-        // [A] ถ้ามีอยู่แล้ว -> ให้ "ลบออก"
         $del = $pdo->prepare("DELETE FROM favorites WHERE user_id = ? AND place_id = ?");
         $del->execute([$uid, $pid]);
         $_SESSION['alert'] = ['type' => 'success', 'title' => '💔 ยกเลิก', 'text' => 'ลบออกจากรายการโปรดแล้ว'];
     } else {
-        // [B] ถ้ายังไม่มี -> เช็คโควต้า 10 รายการ -> แล้ว "เพิ่ม"
         $countStmt = $pdo->prepare("SELECT COUNT(*) FROM favorites WHERE user_id = ?");
         $countStmt->execute([$uid]);
-        $currentFavs = $countStmt->fetchColumn();
-
-        if ($currentFavs >= 10) {
-            $_SESSION['alert'] = ['type' => 'warning', 'title' => '⚠️ เต็มแล้ว!', 'text' => 'รายการโปรดเต็ม 10 รายการ (กรุณาลบของเก่าออกก่อน)'];
+        if ($countStmt->fetchColumn() >= 10) {
+            $_SESSION['alert'] = ['type' => 'warning', 'title' => '⚠️ เต็มแล้ว!', 'text' => 'รายการโปรดเต็ม 10 รายการ'];
         } else {
             $stmt = $pdo->prepare("INSERT INTO favorites (user_id, place_id) VALUES (?, ?)");
             $stmt->execute([$uid, $pid]);
             $_SESSION['alert'] = ['type' => 'success', 'title' => '❤️ ถูกใจ!', 'text' => 'เพิ่มในรายการโปรดแล้ว'];
         }
     }
-
     header("Location: index.php" . $redirect_params);
     exit;
 }
 
 // ==========================================
-// 3. ส่วนดึงข้อมูล (Fetch Data)
+// 3. ดึงข้อมูล (Fetch Data)
 // ==========================================
 $moods = $pdo->query("SELECT * FROM moods")->fetchAll();
 $coping_methods = $pdo->query("SELECT * FROM coping_methods")->fetchAll();
 $places = [];
-
-// ดึงรายการ ID สถานที่ที่ User คนนี้เคยกด Fav ไว้ (เพื่อเอาไปเปลี่ยนสีปุ่มหัวใจ)
 $user_fav_ids = [];
+
 if (isset($_SESSION['user_id'])) {
     $stmt_favs = $pdo->prepare("SELECT place_id FROM favorites WHERE user_id = ?");
     $stmt_favs->execute([$_SESSION['user_id']]);
     $user_fav_ids = $stmt_favs->fetchAll(PDO::FETCH_COLUMN);
 }
 
-// ค้นหาสถานที่ (เมื่อมี mood_id)
-if ($current_mood != '') {
+// Logic การค้นหา
+if ($search_query != '') {
+    $sql = "SELECT * FROM places WHERE name LIKE ? OR description LIKE ? OR address LIKE ?";
+    $term = "%$search_query%";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$term, $term, $term]);
+    $places = $stmt->fetchAll();
+
+} elseif ($current_mood != '') {
     if (!isset($_SESSION['user_id'])) {
         $_SESSION['alert'] = ['type' => 'warning', 'title' => '🔒 กรุณาเข้าสู่ระบบ', 'text' => 'ต้องล็อกอินก่อนจึงจะค้นหาได้'];
         header("Location: login.php");
         exit;
     }
-
-    $sql = "SELECT p.* FROM places p 
-            JOIN place_moods pm ON p.id = pm.place_id 
-            WHERE pm.mood_id = ?";
+    $sql = "SELECT p.* FROM places p JOIN place_moods pm ON p.id = pm.place_id WHERE pm.mood_id = ?";
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$current_mood]);
     $places = $stmt->fetchAll();
@@ -94,249 +115,276 @@ if ($current_mood != '') {
 ?>
 <!DOCTYPE html>
 <html lang="th">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mood Location Finder</title>
-    
+
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;600&display=swap" rel="stylesheet">
-    
+
     <style>
-        /* ตั้งค่าฟ้อนต์หลัก */
         body {
             font-family: 'Prompt', sans-serif;
             background-color: #f8f9fa;
         }
 
-        /* Hero Section สีม่วงไล่เฉด */
         .hero-section {
             background: linear-gradient(135deg, rgba(142, 68, 173, 0.9), rgba(44, 62, 80, 0.8)), url('https://source.unsplash.com/random/1600x900/?landscape,purple');
             background-size: cover;
             background-position: center;
             color: white;
-            padding: 100px 0 120px 0; /* เพิ่ม padding ด้านล่างเผื่อกล่องค้นหา */
+            padding: 60px 0 100px 0;
             border-bottom-left-radius: 50px;
             border-bottom-right-radius: 50px;
-            box-shadow: 0 10px 30px rgba(142, 68, 173, 0.2);
-            margin-bottom: 60px;
+            margin-bottom: 50px;
         }
 
-        /* กล่องค้นหาลอยเด่น */
-        .search-card {
-            margin-top: -80px; /* ดึงขึ้นไปทับ Hero */
+        .main-card {
+            margin-top: -80px;
             border-radius: 20px;
             border: none;
-            box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
             background: rgba(255, 255, 255, 0.98);
         }
 
-        /* แต่งปุ่มและ Input */
-        .form-select-lg {
-            border-radius: 50px;
-            border: 2px solid #e9ecef;
-            font-size: 1rem;
-        }
-        .form-select-lg:focus {
-            border-color: #8e44ad;
-            box-shadow: 0 0 0 0.25rem rgba(142, 68, 173, 0.25);
-        }
-        
-        .btn-search {
-            background-color: #8e44ad;
-            border-color: #8e44ad;
-            color: white;
-            border-radius: 50px;
-            font-weight: 600;
-            transition: all 0.3s;
-        }
-        .btn-search:hover {
-            background-color: #732d91;
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(142, 68, 173, 0.3);
+        /* ปุ่ม Emoji */
+        .emoji-btn {
+            background: #fff;
+            border: 2px solid #f1f1f1;
+            border-radius: 15px;
+            padding: 10px 5px;
+            cursor: pointer;
+            transition: all 0.2s;
+            height: 100%;
         }
 
-        /* การ์ดสถานที่ */
+        .emoji-btn:hover {
+            border-color: #8e44ad;
+            background: #fcf4ff;
+            transform: translateY(-3px);
+        }
+
+        .emoji-btn.active {
+            background: #8e44ad;
+            color: white;
+            border-color: #8e44ad;
+        }
+
+        .emoji-icon {
+            font-size: 2.2rem;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        /* Place Card */
         .place-card {
             border: none;
             border-radius: 15px;
             overflow: hidden;
-            transition: transform 0.3s, box-shadow 0.3s;
+            transition: transform 0.3s;
             height: 100%;
             background: white;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
         }
+
         .place-card:hover {
             transform: translateY(-5px);
-            box-shadow: 0 10px 20px rgba(0,0,0,0.08);
         }
+
         .place-img {
             height: 200px;
             object-fit: cover;
             width: 100%;
         }
 
-        /* สี Text ม่วง */
         .text-purple {
             color: #8e44ad !important;
         }
+
+        .bg-purple-light {
+            background-color: #f8f0fc;
+        }
+
+        /* ปรับแต่ง Quiz ให้ดูเป็นส่วนเสริม */
+        .quiz-section {
+            border-top: 2px dashed #e0e0e0;
+            padding-top: 30px;
+            margin-top: 30px;
+        }
     </style>
 </head>
+
 <body class="d-flex flex-column min-vh-100">
 
     <?php include 'navbar.php'; ?>
 
     <main class="flex-shrink-0">
-        
-        <div class="hero-section text-center position-relative">
+        <div class="hero-section text-center">
             <div class="container">
-                <h1 class="display-4 fw-bold mb-3">✨ วันนี้คุณรู้สึกอย่างไร? ✨</h1>
-                <p class="lead fs-5 opacity-75">ให้เราช่วยหาสถานที่ฮีลใจ หรือที่ที่เหมาะกับอารมณ์ของคุณ 💜</p>
+                <h1 class="display-5 fw-bold mb-3">✨ ค้นหาสถานที่ฮีลใจ ✨</h1>
+                <p class="lead opacity-75">พิมพ์ค้นหา หรือเลือกอารมณ์ของคุณด้านล่าง</p>
             </div>
         </div>
 
         <div class="container mb-5">
-            <div class="card p-4 p-md-5 search-card mb-5">
-                <form method="get">
-                    <div class="row align-items-end g-3">
-                        
-                        <div class="col-md-4">
-                            <label class="form-label fw-bold text-purple ps-2">1. 🎭 ความรู้สึก</label>
-                            <select name="mood_id" id="mood_select" class="form-select form-select-lg" required onchange="updateCopingOptions()">
-                                <option value="">-- เลือกความรู้สึก --</option>
-                                <?php foreach ($moods as $m): ?>
-                                        <option value="<?= $m['id'] ?>" <?= ($current_mood == $m['id']) ? 'selected' : '' ?>>
-                                            <?= $m['mood_name'] ?>
-                                        </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
+            <div class="card p-4 p-md-5 main-card mb-5">
 
-                        <div class="col-md-4">
-                            <label class="form-label fw-bold text-purple ps-2">2. 🛠️ วิธีจัดการ</label>
-                            <input type="hidden" id="old_coping_value" value="<?= htmlspecialchars($current_coping) ?>">
-                            <select name="coping_method" id="coping_select" class="form-select form-select-lg" required>
-                                <option value="">-- กรุณาเลือกความรู้สึกก่อน --</option>
-                            </select>
-                        </div>
+                <div class="mb-4">
+                    <form method="get" class="d-flex gap-2">
+                        <input type="text" name="q"
+                            class="form-control form-control-lg rounded-pill px-4 border-2 border-primary"
+                            placeholder="🔍 พิมพ์ชื่อสถานที่ (เช่น สวน, คาเฟ่, วัด)"
+                            value="<?= htmlspecialchars($search_query) ?>">
+                        <button class="btn btn-primary rounded-pill px-4 fw-bold" type="submit">ค้นหา</button>
+                    </form>
+                </div>
 
-                        <div class="col-md-4">
-                            <button type="submit" class="btn btn-search w-100 btn-lg">
-                                🔍 ค้นหาสถานที่
-                            </button>
-                        </div>
-                    </div>
-                </form>
-            </div>
-
-            <?php if ($current_mood != ''): ?>
-                
-                    <?php if (!empty($places)): ?>
-                            <div class="d-flex align-items-center mb-4">
-                                <h4 class="mb-0 fw-bold text-secondary">สถานที่แนะนำ:</h4>
-                                <span class="badge bg-primary ms-2 fs-6 rounded-pill px-3 py-2">
-                                    <?= htmlspecialchars($current_coping) ?>
-                                </span>
+                <div class="mb-4">
+                    <h5 class="fw-bold text-purple mb-3">🎭 เลือกตามอารมณ์ของคุณ</h5>
+                    <div class="row g-2">
+                        <?php foreach ($moods as $m): ?>
+                            <?php
+                            $parts = explode(' ', $m['mood_name'], 2);
+                            $emoji = $parts[0];
+                            $name = isset($parts[1]) ? $parts[1] : $m['mood_name'];
+                            $activeClass = ($current_mood == $m['id']) ? 'active' : '';
+                            ?>
+                            <div class="col-4 col-md-2">
+                                <a href="?mood_id=<?= $m['id'] ?>" class="text-decoration-none">
+                                    <div class="emoji-btn text-center <?= $activeClass ?>">
+                                        <span class="emoji-icon"><?= $emoji ?></span>
+                                        <small class="d-block fw-bold text-dark"
+                                            style="font-size: 0.8rem;"><?= $name ?></small>
+                                    </div>
+                                </a>
                             </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
 
-                            <div class="row g-4">
-                                <?php foreach ($places as $place): ?>
-                        
-                                    <?php
-                                    // Logic ปุ่มหัวใจ
-                                    $is_fav = in_array($place['id'], $user_fav_ids);
-                                    $fav_btn_class = $is_fav ? 'btn-danger' : 'btn-outline-danger';
-                                    $fav_icon = $is_fav ? '❤️' : '🤍';
-                                    $fav_title = $is_fav ? 'ลบออกจากรายการโปรด' : 'เพิ่มในรายการโปรด';
-                                    ?>
+                <?php if ($current_mood != ''): ?>
+                    <div class="alert alert-light border-start border-4 border-primary shadow-sm mb-4">
+                        <form method="get">
+                            <input type="hidden" name="mood_id" value="<?= $current_mood ?>">
+                            <div class="row align-items-center">
+                                <div class="col-md-3">
+                                    <label class="fw-bold text-purple fs-5">🛠️ อยากจัดการแบบไหน?</label>
+                                </div>
+                                <div class="col-md-6">
+                                    <select name="coping_method"
+                                        class="form-select form-select-lg rounded-pill border-primary"
+                                        onchange="this.form.submit()">
+                                        <option value="">-- เลือกวิธีจัดการ (ระบบจะค้นหาทันที) --</option>
+                                        <?php
+                                        foreach ($coping_methods as $cm) {
+                                            if ($cm['mood_id'] == $current_mood) {
+                                                $sel = ($current_coping == $cm['method_name']) ? 'selected' : '';
+                                                echo "<option value='{$cm['method_name']}' $sel>{$cm['method_name']}</option>";
+                                            }
+                                        }
+                                        ?>
+                                    </select>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                <?php endif; ?>
 
+                <div class="quiz-section text-center">
+                    <p class="text-muted mb-2">ไม่แน่ใจว่ารู้สึกยังไง?</p>
+                    <button class="btn btn-outline-secondary rounded-pill btn-sm px-4" type="button"
+                        data-bs-toggle="collapse" data-bs-target="#quizCollapse">
+                        🤖 ให้ AI ช่วยวิเคราะห์ (คลิก)
+                    </button>
+
+                    <div class="collapse mt-3" id="quizCollapse">
+                        <div class="bg-purple-light p-4 rounded-4 text-start">
+                            <form method="get">
+                                <input type="hidden" name="quiz_action" value="1">
+                                <div class="row g-3">
                                     <div class="col-md-4">
-                                        <div class="place-card shadow-sm h-100">
-                                            <div class="position-relative">
-                                                <img src="<?= htmlspecialchars($place['image_url']) ?>" class="place-img" onerror="this.src='https://via.placeholder.com/400x300?text=No+Image'">
-                                                <span class="position-absolute top-0 end-0 m-2 badge bg-light text-dark opacity-75">
-                                                    📍 <?= mb_substr($place['address'], 0, 15) ?>...
-                                                </span>
-                                            </div>
-                                
-                                            <div class="card-body d-flex flex-column">
-                                                <h5 class="card-title fw-bold text-dark"><?= htmlspecialchars($place['name']) ?></h5>
-                                                <p class="card-text text-muted small flex-grow-1">
-                                                    <?= htmlspecialchars($place['description']) ?>
-                                                </p>
-                                    
-                                                <div class="d-flex gap-2 mt-3 pt-3 border-top">
-                                                    <a href="?go_place=<?= $place['id'] ?>&mood_id=<?= $current_mood ?>&coping_method=<?= urlencode($current_coping) ?>" 
-                                                       class="btn btn-success flex-grow-1 rounded-pill fw-bold btn-sm py-2">
-                                                        🗺️ นำทาง
-                                                    </a>
-                                        
-                                                    <a href="?fav_place=<?= $place['id'] ?>&mood_id=<?= $current_mood ?>&coping_method=<?= urlencode($current_coping) ?>" 
-                                                       class="btn <?= $fav_btn_class ?> rounded-circle d-flex align-items-center justify-content-center" 
-                                                       style="width: 40px; height: 40px;"
-                                                       title="<?= $fav_title ?>">
-                                                        <?= $fav_icon ?>
-                                                    </a>
-                                                </div>
-                                            </div>
+                                        <label class="fw-bold mb-2">ระดับพลังงาน?</label>
+                                        <div class="btn-group w-100" role="group">
+                                            <input type="radio" class="btn-check" name="q_energy" id="e1" value="low"
+                                                checked>
+                                            <label class="btn btn-outline-purple" for="e1">ต่ำ</label>
+                                            <input type="radio" class="btn-check" name="q_energy" id="e3" value="high">
+                                            <label class="btn btn-outline-purple" for="e3">สูง</label>
                                         </div>
                                     </div>
-                                <?php endforeach; ?>
-                            </div>
-                    <?php else: ?>
-                            <div class="alert alert-light text-center py-5 shadow-sm rounded-4">
-                                <h1 class="display-1">🤔</h1>
-                                <h4 class="mt-3 text-muted">ไม่พบสถานที่ที่ตรงกับอารมณ์นี้ในระบบ</h4>
-                                <p>ลองเปลี่ยนอารมณ์หรือวิธีจัดการดูนะครับ</p>
-                            </div>
+                                    <div class="col-md-4">
+                                        <label class="fw-bold mb-2">ความต้องการ?</label>
+                                        <select name="q_desire" class="form-select rounded-pill border-purple">
+                                            <option value="sleep">อยากนอน / พัก</option>
+                                            <option value="relax">อยากนั่งโง่ๆ</option>
+                                            <option value="scream">อยากระบาย / ตะโกน</option>
+                                            <option value="party">อยากฉลอง</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4 d-flex align-items-end">
+                                        <button type="submit"
+                                            class="btn btn-primary w-100 rounded-pill">วิเคราะห์</button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <?php if (!empty($places)): ?>
+                <div class="d-flex align-items-center mb-4">
+                    <h4 class="mb-0 fw-bold text-secondary">📍 ผลการค้นหา:</h4>
+                    <?php if ($current_coping): ?>
+                        <span class="badge bg-primary ms-2"><?= htmlspecialchars($current_coping) ?></span>
                     <?php endif; ?>
-            
+                </div>
+
+                <div class="row g-4">
+                    <?php foreach ($places as $place): ?>
+                        <?php
+                        $is_fav = in_array($place['id'], $user_fav_ids);
+                        $fav_btn_class = $is_fav ? 'btn-danger' : 'btn-outline-danger';
+                        ?>
+                        <div class="col-md-4">
+                            <div class="place-card shadow-sm h-100">
+                                <div class="position-relative">
+                                    <img src="<?= htmlspecialchars($place['image_url']) ?>" class="place-img"
+                                        onerror="this.src='https://via.placeholder.com/400x300'">
+                                    <span class="position-absolute top-0 end-0 m-2 badge bg-white text-dark shadow-sm fw-bold">
+                                        <?= mb_substr($place['address'], 0, 15) ?>...
+                                    </span>
+                                </div>
+                                <div class="card-body d-flex flex-column">
+                                    <h5 class="fw-bold"><?= htmlspecialchars($place['name']) ?></h5>
+                                    <p class="text-muted small flex-grow-1"><?= htmlspecialchars($place['description']) ?></p>
+
+                                    <div class="d-flex gap-2 mt-3 pt-3 border-top">
+                                        <a href="?go_place=<?= $place['id'] ?>&mood_id=<?= $current_mood ?>&coping_method=<?= urlencode($current_coping) ?>"
+                                            class="btn btn-success flex-grow-1 rounded-pill btn-sm py-2 fw-bold">🗺️ นำทาง</a>
+                                        <a href="?fav_place=<?= $place['id'] ?>&mood_id=<?= $current_mood ?>&coping_method=<?= urlencode($current_coping) ?>"
+                                            class="btn <?= $fav_btn_class ?> rounded-circle d-flex align-items-center justify-content-center"
+                                            style="width: 40px; height: 40px;">❤️</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php elseif (($current_mood != '' || $search_query != '') && empty($places)): ?>
+                <div class="alert alert-light text-center py-5 shadow-sm rounded-4">
+                    <h1 class="display-1">🤷‍♂️</h1>
+                    <h4 class="mt-3 text-muted">ไม่พบสถานที่ตามเงื่อนไขนี้</h4>
+                </div>
             <?php endif; ?>
         </div>
     </main>
 
     <?php include 'footer.php'; ?>
-    
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
-    <script>
-        const copingData = <?= json_encode($coping_methods) ?>;
-
-        function updateCopingOptions() {
-            const moodSelect = document.getElementById('mood_select');
-            const copingSelect = document.getElementById('coping_select');
-            const selectedMoodId = moodSelect.value;
-            const oldValue = document.getElementById('old_coping_value').value; 
-
-            // เคลียร์ค่าเก่า
-            copingSelect.innerHTML = '<option value="">-- เลือกวิธีจัดการ --</option>';
-
-            if (selectedMoodId) {
-                // กรองเฉพาะ Coping Methods ของ Mood ที่เลือก
-                const filtered = copingData.filter(item => item.mood_id == selectedMoodId);
-                
-                if (filtered.length > 0) {
-                    filtered.forEach(item => {
-                        const option = document.createElement('option');
-                        option.value = item.method_name;
-                        option.text = item.method_name;
-                        
-                        // Auto Select ค่าเดิม (ถ้ามี)
-                        if (item.method_name === oldValue) {
-                            option.selected = true;
-                        }
-                        
-                        copingSelect.appendChild(option);
-                    });
-                } else {
-                    copingSelect.innerHTML = '<option value="">ไม่มีข้อมูลวิธีจัดการสำหรับอารมณ์นี้</option>';
-                }
-            } else {
-                copingSelect.innerHTML = '<option value="">-- กรุณาเลือกความรู้สึกก่อน --</option>';
-            }
-        }
-
-        // เรียกฟังก์ชันทันทีเมื่อโหลดหน้าเว็บ (เพื่อคืนค่า Dropdown หลังกดค้นหา)
-        window.onload = updateCopingOptions;
-    </script>
 </body>
+
 </html>
