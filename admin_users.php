@@ -9,7 +9,7 @@ if (!isset($_SESSION['role']) || ($_SESSION['role'] != 'admin' && $_SESSION['rol
     exit;
 }
 
-// Logic ลบ User (อนุญาตเฉพาะ Owner เท่านั้นถึงจะลบได้เลย)
+// Logic ลบ User
 if (isset($_GET['delete_user'])) {
     if ($_SESSION['role'] != 'owner') {
         $_SESSION['alert'] = ['type' => 'error', 'title' => 'ไม่อนุญาต', 'text' => 'Admin ต้องส่งคำขอลบพร้อมเหตุผลเท่านั้น'];
@@ -27,8 +27,8 @@ if (isset($_GET['delete_user'])) {
     exit;
 }
 
-// ดึงข้อมูล User ทั้งหมด
-$stmt = $pdo->query("SELECT * FROM users ORDER BY id DESC");
+// [แก้ไขตรงนี้] เปลี่ยนจาก DESC เป็น ASC เพื่อให้เรียงเลขจากน้อยไปมาก (1, 2, 3...)
+$stmt = $pdo->query("SELECT * FROM users ORDER BY id ASC");
 $users = $stmt->fetchAll();
 ?>
 <!DOCTYPE html>
@@ -42,13 +42,14 @@ $users = $stmt->fetchAll();
 </head>
 <body class="d-flex flex-column min-vh-100">
     <?php include 'navbar.php'; ?>
-    <div class="container mt-5">
+    
+    <div class="container mt-5 mb-5">
         <div class="card p-4 shadow-sm border-0">
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h2 class="fw-bold text-primary">👮‍♂️ รายชื่อผู้ใช้งานในระบบ</h2>
                 
-                <?php if ($_SESSION['role'] == 'owner'): ?>
-                        <a href="admin_user_form.php" class="btn btn-success">+ เพิ่มผู้ใช้ / แอดมินใหม่</a>
+                <?php if($_SESSION['role'] == 'owner'): ?>
+                    <a href="admin_user_form.php" class="btn btn-success">+ เพิ่มผู้ใช้ / แอดมินใหม่</a>
                 <?php endif; ?>
             </div>
 
@@ -65,42 +66,44 @@ $users = $stmt->fetchAll();
                     </thead>
                     <tbody>
                         <?php if (count($users) > 0): ?>
-                                <?php foreach ($users as $u): ?>
-                                    <tr>
-                                        <td><?= $u['id'] ?></td>
-                                        <td><?= htmlspecialchars($u['username']) ?></td>
-                                        <td><?= htmlspecialchars($u['email']) ?></td>
-                                        <td>
-                                            <span class="badge bg-<?= $u['role'] == 'owner' ? 'danger' : ($u['role'] == 'admin' ? 'info' : 'secondary') ?>">
-                                                <?= ucfirst($u['role']) ?>
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <?php if ($_SESSION['role'] == 'owner'): ?>
-                                                    <?php if ($u['role'] != 'owner'): ?>
-                                                            <a href="?delete_user=<?= $u['id'] ?>" class="btn btn-sm btn-danger" onclick="return confirm('ยืนยันลบถาวร?');">ลบถาวร</a>
-                                                    <?php else: ?>
-                                                            <span class="text-muted small">-</span>
-                                                    <?php endif; ?>
-
-                                            <?php elseif ($_SESSION['role'] == 'admin'): ?>
-                                                    <?php if ($u['role'] == 'user'): ?>
-                                                            <a href="request_delete_user.php?id=<?= $u['id'] ?>" class="btn btn-sm btn-warning">⚠️ ขอลบ</a>
-                                                    <?php else: ?>
-                                                            <span class="text-muted small">ห้ามลบระดับสูง</span>
-                                                    <?php endif; ?>
-                                            <?php endif; ?>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
+                            <?php foreach ($users as $u): ?>
+                            <tr>
+                                <td><?= $u['id'] ?></td>
+                                <td><?= htmlspecialchars($u['username']) ?></td>
+                                <td><?= htmlspecialchars($u['email']) ?></td>
+                                <td>
+                                    <span class="badge bg-<?= $u['role'] == 'owner' ? 'danger' : ($u['role'] == 'admin' ? 'info' : 'secondary') ?>">
+                                        <?= ucfirst($u['role']) ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <?php if($_SESSION['role'] == 'owner'): ?>
+                                        <?php if($u['role'] != 'owner'): ?>
+                                            <a href="?delete_user=<?= $u['id'] ?>" class="btn btn-sm btn-danger" onclick="return confirm('ยืนยันลบถาวร?');">ลบถาวร</a>
+                                        <?php else: ?>
+                                            <span class="text-muted small">-</span>
+                                        <?php endif; ?>
+                                    <?php elseif($_SESSION['role'] == 'admin'): ?>
+                                        <?php if($u['role'] == 'user'): ?>
+                                            <a href="request_delete_user.php?id=<?= $u['id'] ?>" class="btn btn-sm btn-warning">⚠️ ขอลบ</a>
+                                        <?php else: ?>
+                                            <span class="text-muted small">ห้ามลบระดับสูง</span>
+                                        <?php endif; ?>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
                         <?php else: ?>
-                                <tr><td colspan="5" class="text-center text-muted">ยังไม่มีข้อมูลผู้ใช้งาน</td></tr>
+                            <tr><td colspan="5" class="text-center text-muted">ยังไม่มีข้อมูลผู้ใช้งาน</td></tr>
                         <?php endif; ?>
                     </tbody>
                 </table>
             </div>
         </div>
     </div>
+
+    <?php include 'footer.php'; ?>
+    
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
