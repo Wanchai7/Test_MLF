@@ -1,6 +1,13 @@
-<footer class="bg-dark text-white text-center py-4 mt-auto">
+<footer class="bg-custom-purple text-white text-center py-4 mt-auto">
     <div class="container">
-        <p class="mb-0">Mood Location Finder © 2025</p>
+        <h5 class="fw-bold">🔮 Mood Location Finder</h5>
+        <p class="small opacity-75">
+            ค้นหาสถานที่ที่ใช่ ในวันที่ใจต้องการ <br>
+            ออกแบบเพื่อความรู้สึกของคุณ 💜
+        </p>
+        <div class="mt-3">
+            <span class="mx-2">© 2025 All Rights Reserved.</span>
+        </div>
     </div>
 </footer>
 
@@ -11,7 +18,7 @@
             icon: '<?= $_SESSION['alert']['type'] ?>',
             title: '<?= $_SESSION['alert']['title'] ?>',
             text: '<?= $_SESSION['alert']['text'] ?>',
-            confirmButtonColor: '#0d6efd',
+            confirmButtonColor: '#8e44ad', // สีปุ่ม Popup เป็นสีม่วง
             timer: 3000
         });
     </script>
