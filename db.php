@@ -1,8 +1,8 @@
 <?php
-$host = 'sql206.infinityfree.com';
+$host = 'localhost';
 $db = 'if0_40753895_mlf';
-$user = 'if0_40753895';
-$pass = 'moodfinder1234';
+$user = 'root';
+$pass = '';
 
 $dsn = "mysql:host=$host;dbname=$db;charset=utf8mb4";
 $options = [
