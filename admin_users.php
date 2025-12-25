@@ -27,8 +27,10 @@ if (isset($_GET['delete_user'])) {
     exit;
 }
 
-// [แก้ไขตรงนี้] เปลี่ยนจาก DESC เป็น ASC เพื่อให้เรียงเลขจากน้อยไปมาก (1, 2, 3...)
-$stmt = $pdo->query("SELECT * FROM users ORDER BY id ASC");
+// [แก้ไขตรงนี้] เรียงตามยศ (Owner -> Admin -> User) และถ้า role เหมือนกันให้เรียงตามชื่อ
+$sql = "SELECT * FROM users 
+        ORDER BY FIELD(role, 'owner', 'admin', 'user'), id ASC";
+$stmt = $pdo->query($sql);
 $users = $stmt->fetchAll();
 ?>
 <!DOCTYPE html>
@@ -57,7 +59,7 @@ $users = $stmt->fetchAll();
                 <table class="table table-hover align-middle">
                     <thead class="table-dark">
                         <tr>
-                            <th>ID</th>
+                            <th width="10%">ลำดับ</th>
                             <th>Username</th>
                             <th>Email</th>
                             <th>Role</th>
@@ -66,10 +68,17 @@ $users = $stmt->fetchAll();
                     </thead>
                     <tbody>
                         <?php if (count($users) > 0): ?>
-                            <?php foreach ($users as $u): ?>
+                            <?php 
+                                // วนลูปพร้อมตัวนับ $index (เริ่มที่ 0)
+                                foreach ($users as $index => $u): 
+                            ?>
                             <tr>
-                                <td><?= $u['id'] ?></td>
-                                <td><?= htmlspecialchars($u['username']) ?></td>
+                                <td><?= $index + 1 ?></td> 
+                                
+                                <td>
+                                    <?= htmlspecialchars($u['username']) ?>
+                                    <span class="text-muted small ms-1">(#<?= $u['id'] ?>)</span>
+                                </td>
                                 <td><?= htmlspecialchars($u['email']) ?></td>
                                 <td>
                                     <span class="badge bg-<?= $u['role'] == 'owner' ? 'danger' : ($u['role'] == 'admin' ? 'info' : 'secondary') ?>">
@@ -87,7 +96,7 @@ $users = $stmt->fetchAll();
                                         <?php if($u['role'] == 'user'): ?>
                                             <a href="request_delete_user.php?id=<?= $u['id'] ?>" class="btn btn-sm btn-warning">⚠️ ขอลบ</a>
                                         <?php else: ?>
-                                            <span class="text-muted small">ห้ามลบระดับสูง</span>
+                                            <span class="text-muted small">-</span>
                                         <?php endif; ?>
                                     <?php endif; ?>
                                 </td>
